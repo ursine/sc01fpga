@@ -2,7 +2,7 @@
 	$(CC) -g -c -o $@ $< $(CFLAGS)
 
 speak: main.o votrax_imp.o
-	$(CC) -o speak main.o votrax_imp.o -lm
+	$(CC) -o speak main.o votrax_imp.o -lm -lpulse-simple
 
 all: speak
 

@@ -502,8 +502,6 @@ static void build_injection_filter(double* const a,
 
 static void phone_commit()
 {
-    int i;
-
     // Only these two counters are reset on phone change, the rest is
     // free-running.
     votraxsc01_locals.phonetick = 0;
@@ -511,7 +509,7 @@ static void phone_commit()
 
     // In the real chip, the rom is re-read all the time.  Since it's
     // internal and immutable, no point in not caching it though.
-    for (i = 0; i<64; i++) {
+    for (int i = 0; i<64; i++) {
         const uint64_t val = ((uint64_t*)sc01a_bin)[i];
         if (votraxsc01_locals.phone == ((val >> 56) & 0x3f))
         {
@@ -598,7 +596,7 @@ void filters_commit(int force)
                               50019);
     }
 
-    if(force) {
+    if (force) {
         build_standard_filter(votraxsc01_locals.f4_a, votraxsc01_locals.f4_b,
                               0,
                               28810,
@@ -817,11 +815,15 @@ static void chip_update()
 
     // Non-formant update. Same bug there, va should be updated, not fc.
     if(tick_625) {
-        if (votraxsc01_locals.ticks >= votraxsc01_locals.rom_vd)
+
+        if (votraxsc01_locals.ticks >= votraxsc01_locals.rom_vd) {
             interpolate(&votraxsc01_locals.cur_fa, votraxsc01_locals.rom_fa);
-        if (votraxsc01_locals.ticks >= votraxsc01_locals.rom_cld)
+        }
+
+        if (votraxsc01_locals.ticks >= votraxsc01_locals.rom_cld) {
             //          interpolate(&votraxsc01_locals.cur_fc, votraxsc01_locals.rom_fc);
             interpolate(&votraxsc01_locals.cur_va, votraxsc01_locals.rom_va);
+        }
 
         printf("non-formant int fa=%x va=%x fc=%x f1=%x f2=%02x f2q=%02x f3=%x\n",
                votraxsc01_locals.cur_fa >> 4, votraxsc01_locals.cur_va >> 4, votraxsc01_locals.cur_fc >> 4,
@@ -874,9 +876,9 @@ static void chip_update()
 
 // Shift a history of values by one and insert the new value at the front
 static void shift_hist(const double val, double * const hist_array, const size_t N) {
-    size_t i;
-    for(i=N-1; i>0; i--)
-        hist_array[i] = hist_array[i-1];
+    for(size_t i=N-1; i>0; i--) {
+        hist_array[i] = hist_array[i - 1];
+    }
     hist_array[0] = val;
 }
 
@@ -973,8 +975,9 @@ void Votrax_Update(int16_t* const buffer, const size_t length)
 
     for (int i = 0; i<length; i++) {
         votraxsc01_locals.sample_count++;
-        if (votraxsc01_locals.sample_count & 1)
+        if (votraxsc01_locals.sample_count & 1) {
             chip_update();
+        }
         buffer_f[i] = analog_calc();
         //printf("Votrax SC-01: buffer %d\n", ac);
     }
