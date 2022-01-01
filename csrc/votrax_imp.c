@@ -1,8 +1,29 @@
 #include <math.h>
 #include <memory.h>
 #include <stdio.h>
-
+#include <time.h>
 #include "votrax_imp.h"
+
+// Filter Constants
+static const unsigned int f1_caps[4]   = { 2546, 4973, 9861, 19724 };
+static const unsigned int f2v1_caps[4] = { 1390, 2965, 5875, 11297 };
+static const unsigned int f2v2_caps[5] = { 833, 1663, 3164, 6327, 12654 };
+static const unsigned int f2n1_caps[4] = { 1390, 2965, 5875, 11297 };
+static const unsigned int f2n2_caps[5] = { 833, 1663, 3164, 6327, 12654 };
+static const unsigned int f3_caps[4]   = { 2226, 4485, 9056, 18111 };
+
+static const double s_glottal_wave[] = {
+    0,
+    -4/7.0,
+    7/7.0,
+    6/7.0,
+    5/7.0,
+    4/7.0,
+    3/7.0,
+    2/7.0,
+    1/7.0
+};
+
 
 // ROM definition for the Votrax phone ROM
 static const uint8_t sc01a_bin[512] = {
@@ -50,6 +71,31 @@ static const uint8_t sc01a_bin[512] = {
         0xA1, 0x09, 0x00, 0x02, 0x27, 0x81, 0x68, 0xD4, 0x61, 0x01, 0x00, 0x01,
         0x27, 0x81, 0x68, 0x74, 0x61, 0x03, 0x00, 0x00
 };
+
+static const char *PhonemeNames[65] = {
+    "EH3",  "EH2",  "EH1",  "PA0",  "DT",   "A1",   "A2",   "ZH",
+    "AH2",  "I3",   "I2",   "I1",   "M",    "N",    "B",    "V",
+    "CH",   "SH",   "Z",    "AW1",  "NG",   "AH1",  "OO1",  "OO",
+    "L",    "K",    "J",    "H",    "G",    "F",    "D",    "S",
+    "A",    "AY",   "Y1",   "UH3",  "AH",   "P",    "O",    "I",
+    "U",    "Y",    "T",    "R",    "E",    "W",    "AE",   "AE1",
+    "AW2",  "UH2",  "UH1",  "UH",   "O2",   "O1",   "IU",   "U1",
+    "THV",  "TH",   "ER",   "EH",   "E1",   "AW",   "PA1",  "STOP",
+    0
+};
+
+// Compute a total capacitor value based on which bits are currently active
+static unsigned int bits_to_caps(unsigned int value, const unsigned int* const caps_values, const size_t N) {
+    size_t i;
+    unsigned int total = 0;
+    for(i = 0; i < N; ++i) {
+        if(value & 1)
+            total += caps_values[i];
+        value >>= 1;
+    }
+    return total;
+}
+
 
 static struct votraxsc01_vars votraxsc01_locals;
 
@@ -503,6 +549,84 @@ static void phone_commit()
     }
 }
 
+void filters_commit(int force)
+{
+    votraxsc01_locals.filt_fa = votraxsc01_locals.cur_fa >> 4;
+    votraxsc01_locals.filt_fc = votraxsc01_locals.cur_fc >> 4;
+    votraxsc01_locals.filt_va = votraxsc01_locals.cur_va >> 4;
+
+    if (force || votraxsc01_locals.filt_f1 != votraxsc01_locals.cur_f1 >> 4) {
+        votraxsc01_locals.filt_f1 = votraxsc01_locals.cur_f1 >> 4;
+
+        build_standard_filter(votraxsc01_locals.f1_a, votraxsc01_locals.f1_b,
+                              11247,
+                              11797,
+                              949,
+                              52067,
+                              2280 + bits_to_caps(votraxsc01_locals.filt_f1, f1_caps, 4),
+                              166272);
+    }
+
+    if (force || votraxsc01_locals.filt_f2 != votraxsc01_locals.cur_f2 >> 3 || votraxsc01_locals.filt_f2q != votraxsc01_locals.cur_f2q >> 4) {
+        votraxsc01_locals.filt_f2 = votraxsc01_locals.cur_f2 >> 3;
+        votraxsc01_locals.filt_f2q = votraxsc01_locals.cur_f2q >> 4;
+
+        build_standard_filter(votraxsc01_locals.f2v_a, votraxsc01_locals.f2v_b,
+                              24840,
+                              29154,
+                              829 + bits_to_caps(votraxsc01_locals.filt_f2q, f2v1_caps, 4),
+                              38180,
+                              2352 + bits_to_caps(votraxsc01_locals.filt_f2, f2v2_caps, 5),
+                              34270);
+
+        build_injection_filter(votraxsc01_locals.f2n_a, votraxsc01_locals.f2n_b,
+                               29154,
+                               829 + bits_to_caps(votraxsc01_locals.filt_f2q, f2n1_caps, 4),
+                               38180,
+                               2352 + bits_to_caps(votraxsc01_locals.filt_f2, f2n2_caps, 5),
+                               34270);
+    }
+
+    if (force || votraxsc01_locals.filt_f3 != votraxsc01_locals.cur_f3 >> 4) {
+        votraxsc01_locals.filt_f3 = votraxsc01_locals.cur_f3 >> 4;
+        build_standard_filter(votraxsc01_locals.f3_a, votraxsc01_locals.f3_b,
+                              0,
+                              17594,
+                              868,
+                              18828,
+                              8480 + bits_to_caps(votraxsc01_locals.filt_f3, f3_caps, 4),
+                              50019);
+    }
+
+    if(force) {
+        build_standard_filter(votraxsc01_locals.f4_a, votraxsc01_locals.f4_b,
+                              0,
+                              28810,
+                              1165,
+                              21457,
+                              8558,
+                              7289);
+
+        build_lowpass_filter(votraxsc01_locals.fx_a, votraxsc01_locals.fx_b,
+                             1122,
+                             23131);
+
+        build_noise_shaper_filter(votraxsc01_locals.fn_a, votraxsc01_locals.fn_b,
+                                  15500,
+                                  14854,
+                                  8450,
+                                  9523,
+                                  14083);
+    }
+
+    //if(votraxsc01_locals.filt_fa || votraxsc01_locals.filt_va || votraxsc01_locals.filt_fc || votraxsc01_locals.filt_f1 || votraxsc01_locals.filt_f2 || votraxsc01_locals.filt_f2q || votraxsc01_locals.filt_f3) {
+        printf("filter fa=%x va=%x fc=%x f1=%x f2=%02x f2q=%x f3=%x\n",
+                votraxsc01_locals.filt_fa, votraxsc01_locals.filt_va, votraxsc01_locals.filt_fc,
+                votraxsc01_locals.filt_f1, votraxsc01_locals.filt_f2, votraxsc01_locals.filt_f2q,
+                votraxsc01_locals.filt_f3);
+    //}
+}
+
 int votrax_start()
 {
     memset(&votraxsc01_locals, 0x00, sizeof(votraxsc01_locals));
@@ -512,7 +636,7 @@ int votrax_start()
 
     // initialize internal state
     // TODO: Figure out what a good starting clock is
-    votraxsc01_locals.mainclock = 9000; //votraxsc01_locals.intf->baseFrequency[0]; //!! clock();
+    votraxsc01_locals.mainclock = 9000;
     votraxsc01_locals.sclock = votraxsc01_locals.mainclock / 18.0;
     votraxsc01_locals.cclock = votraxsc01_locals.mainclock / 36.0;
 
@@ -522,7 +646,7 @@ int votrax_start()
 
     // reset outputs
     //!! m_ar_cb.resolve_safe();
-    //votraxsc01_locals.ar_state = ASSERT_LINE;
+    votraxsc01_locals.ar_state = ASSERT_LINE;
 
     //!! was the separate reset code from here on:
 
@@ -532,7 +656,7 @@ int votrax_start()
 
     votraxsc01_locals.phone = 0x3f;
     votraxsc01_locals.inflection = 0;
-    //votraxsc01_locals.ar_state = ASSERT_LINE;
+    votraxsc01_locals.ar_state = ASSERT_LINE;
     //!! m_ar_cb(votraxsc01_locals.ar_state);
 
     votraxsc01_locals.sample_count = 0;
@@ -545,7 +669,7 @@ int votrax_start()
     votraxsc01_locals.cur_f1 = votraxsc01_locals.cur_f2 = votraxsc01_locals.cur_f2q = votraxsc01_locals.cur_f3 = 0;
 
     // Initialize the m_filt* values and the filter coefficients
-    //filters_commit(1);
+    filters_commit(1);
 
     // Clear the rest of the internal digital state
     votraxsc01_locals.pitch = 0;
@@ -563,4 +687,444 @@ void votrax_stop()
     //if (votraxsc01_locals.timer )
     //    timer_remove(votraxsc01_locals.timer);
     //votraxsc01_locals.timer = 0;
+}
+
+
+void stream_update(int channel, int min_interval) {
+    printf("Stream Update\n");
+} // todo: output sound
+
+void votraxsc01_w(const uint8_t data)
+{
+    uint8_t prev;
+
+    // only 2 bits matter
+    int inflection = (data >> 6) & 0x03; //!! MAME astrocde also uses: (data & 0x80) ? 0 : 2;
+    //if (votraxsc01_locals.inflection == inflection) //!! original code, due to separate w for inflection in MAME -> does not matter, astrocde has inflection, then -directly- phone write after it
+    //	return;
+
+    stream_update(votraxsc01_locals.stream, 0);
+    votraxsc01_locals.inflection = inflection;
+
+    //!! in the original code this was the separate phone write from here on:
+
+    // flush out anything currently processing
+    //stream_update(votraxsc01_locals.stream,0);
+
+    prev = votraxsc01_locals.phone;
+
+    // only 6 bits matter
+    votraxsc01_locals.phone = data & 0x3f;
+
+    if (votraxsc01_locals.phone != prev || votraxsc01_locals.phone != 0x3f) {
+        printf("phone %02x.%d %s\n", votraxsc01_locals.phone, votraxsc01_locals.inflection,
+               PhonemeNames[votraxsc01_locals.phone]);
+    }
+    votraxsc01_locals.ar_state = CLEAR_LINE;
+
+    // Schedule a commit/ar reset at roughly 0.1ms in the future (one
+    // phi1 transition followed by the rom extra state in practice),
+    // but only if there isn't already one on the fly.  It will
+    // override an end-of-phone timeout if there's one pending, but
+    // that's not a problem since stb does that anyway.
+//    if (timer_expire(votraxsc01_locals.timer) == TIME_NEVER || timer_param(votraxsc01_locals.timer) != T_COMMIT_PHONE) {
+//        timer_adjust(votraxsc01_locals.timer,
+//                    72./(double)votraxsc01_locals.mainclock  /*attotime::from_ticks(72, votraxsc01_locals.mainclock)*/,
+//                    T_COMMIT_PHONE, TIME_NEVER); //!! correct?
+//    }
+}
+
+
+static void VOTRAXSC01_sh_start_timeout(const clock_enum which)
+{
+    stream_update(votraxsc01_locals.stream, 0);
+
+    switch (which) {
+        case T_COMMIT_PHONE:
+            // strobe -> commit transition,
+            phone_commit();
+            //timer_adjust(votraxsc01_locals.timer, (double)(16 * (votraxsc01_locals.rom_duration * 4u + 1) * 4 * 9 + 2)/(double)votraxsc01_locals.mainclock/*attotime::from_ticks(16 * (votraxsc01_locals.rom_duration * 4 + 1) * 4 * 9 + 2, votraxsc01_locals.mainclock)*/, T_END_OF_PHONE, TIME_NEVER);
+            break;
+
+        case T_END_OF_PHONE:
+            // end of phone
+            votraxsc01_locals.ar_state = ASSERT_LINE;
+            break;
+
+        default:
+            break;
+    }
+
+    //!! m_ar_cb(votraxsc01_locals.ar_state);
+    //if (votraxsc01_locals.intf->BusyCallback[0])
+    //    (*votraxsc01_locals.intf->BusyCallback[0])(!votraxsc01_locals.ar_state); //!! inverted behavior from MAME
+}
+
+
+static void interpolate(uint8_t* const reg, const uint8_t target)
+{
+    // One step of interpolation, adds one eight of the distance
+    // between the current value and the target.
+    *reg = *reg - (*reg >> 3) + (target << 1);
+}
+
+
+static void chip_update()
+{
+    // Phone tick counter update.  Stopped when ticks reach 16.
+    // Technically the counter keeps updating, but the comparator is
+    // disabled.
+    if (votraxsc01_locals.ticks != 0x10) {
+        votraxsc01_locals.phonetick++;
+        // Comparator is with duration << 2, but there's a one-tick
+        // delay in the path.
+        if (votraxsc01_locals.phonetick == ((votraxsc01_locals.rom_duration << 2) | 1)) {
+            votraxsc01_locals.phonetick = 0;
+            votraxsc01_locals.ticks++;
+            if (votraxsc01_locals.ticks == votraxsc01_locals.rom_cld)
+                votraxsc01_locals.cur_closure = votraxsc01_locals.rom_closure;
+        }
+    }
+
+    // The two update timing counters.  One divides by 16, the other
+    // by 48, and they're phased so that the 208Hz counter ticks
+    // exactly between two 625Hz ticks.
+    votraxsc01_locals.update_counter++;
+    if (votraxsc01_locals.update_counter == 0x30) {
+        votraxsc01_locals.update_counter = 0;
+    }
+
+    int tick_625 = !(votraxsc01_locals.update_counter & 0xf);
+    int tick_208 = (votraxsc01_locals.update_counter == 0x28);
+
+    // Formant update.  Die bug there: fc should be updated, not va.
+    // The formants are frozen on a pause phone unless both voice and
+    // noise volumes are zero.
+    if (tick_208 && (!votraxsc01_locals.rom_pause || !(votraxsc01_locals.filt_fa || votraxsc01_locals.filt_va))) {
+        //      interpolate(&votraxsc01_locals.cur_va,  votraxsc01_locals.rom_va);
+        interpolate(&votraxsc01_locals.cur_fc, votraxsc01_locals.rom_fc);
+        interpolate(&votraxsc01_locals.cur_f1, votraxsc01_locals.rom_f1);
+        interpolate(&votraxsc01_locals.cur_f2, votraxsc01_locals.rom_f2);
+        interpolate(&votraxsc01_locals.cur_f2q, votraxsc01_locals.rom_f2q);
+        interpolate(&votraxsc01_locals.cur_f3, votraxsc01_locals.rom_f3);
+
+        printf("formant int fa=%x va=%x fc=%x f1=%x f2=%02x f2q=%02x f3=%x\n",
+               votraxsc01_locals.cur_fa >> 4, votraxsc01_locals.cur_va >> 4,
+               votraxsc01_locals.cur_fc >> 4, votraxsc01_locals.cur_f1 >> 4,
+               votraxsc01_locals.cur_f2 >> 3, votraxsc01_locals.cur_f2q >> 4,
+               votraxsc01_locals.cur_f3 >> 4);
+    }
+
+    // Non-formant update. Same bug there, va should be updated, not fc.
+    if(tick_625) {
+        if (votraxsc01_locals.ticks >= votraxsc01_locals.rom_vd)
+            interpolate(&votraxsc01_locals.cur_fa, votraxsc01_locals.rom_fa);
+        if (votraxsc01_locals.ticks >= votraxsc01_locals.rom_cld)
+            //          interpolate(&votraxsc01_locals.cur_fc, votraxsc01_locals.rom_fc);
+            interpolate(&votraxsc01_locals.cur_va, votraxsc01_locals.rom_va);
+
+        printf("non-formant int fa=%x va=%x fc=%x f1=%x f2=%02x f2q=%02x f3=%x\n",
+               votraxsc01_locals.cur_fa >> 4, votraxsc01_locals.cur_va >> 4, votraxsc01_locals.cur_fc >> 4,
+               votraxsc01_locals.cur_f1 >> 4, votraxsc01_locals.cur_f2 >> 3, votraxsc01_locals.cur_f2q >> 4,
+               votraxsc01_locals.cur_f3 >> 4);
+    }
+
+    // Closure counter, reset every other tick in theory when not
+    // active (on the extra rom cycle).
+    //
+    // The closure level is immediatly used in the analog path,
+    // there's no pitch synchronization.
+
+    if (!votraxsc01_locals.cur_closure && (votraxsc01_locals.filt_fa || votraxsc01_locals.filt_va)) {
+        votraxsc01_locals.closure = 0;
+    }
+    else if (votraxsc01_locals.closure != (7 << 2)) {
+        votraxsc01_locals.closure++;
+    }
+
+    // Pitch counter.  Equality comparison, so it's possible to make
+    // it miss by manipulating the inflection inputs, but it'll wrap.
+    // There's a delay, hence the +2.
+
+    // Intrinsically pre-divides by two, so we added one bit on the 7
+
+    votraxsc01_locals.pitch = (votraxsc01_locals.pitch + 1) & 0xff;
+    if(votraxsc01_locals.pitch == (0xe0 ^ (votraxsc01_locals.inflection << 5) ^ (votraxsc01_locals.filt_f1 << 1)) + 2) {
+        votraxsc01_locals.pitch = 0;
+    }
+
+    // Filters are updated in index 1 of the pitch wave, which does
+    // indeed mean four times in a row.
+    if ((votraxsc01_locals.pitch & 0xf9) == 0x08) {
+        filters_commit(0);
+    }
+
+    // Noise shift register.  15 bits, with a nxor on the last two
+    // bits for the loop.
+    int inp = (1 || votraxsc01_locals.filt_fa) && votraxsc01_locals.cur_noise && (votraxsc01_locals.noise != 0x7fff);
+    votraxsc01_locals.noise = ((votraxsc01_locals.noise << 1) & 0x7ffe) | inp;
+    votraxsc01_locals.cur_noise = !(((votraxsc01_locals.noise >> 14) ^ (votraxsc01_locals.noise >> 13)) & 1);
+
+    printf("tick %02x.%03x 625=%d 208=%d pitch=%02x.%x ns=%04x ni=%d noise=%d cl=%x.%x clf=%d/%d ar=%d\n",
+           votraxsc01_locals.ticks, votraxsc01_locals.phonetick, tick_625, tick_208, votraxsc01_locals.pitch >> 3,
+           votraxsc01_locals.pitch & 7, votraxsc01_locals.noise, inp, votraxsc01_locals.cur_noise,
+           votraxsc01_locals.closure >> 2, votraxsc01_locals.closure & 3, votraxsc01_locals.rom_closure,
+           votraxsc01_locals.cur_closure, votraxsc01_locals.ar_state);
+}
+
+// Shift a history of values by one and insert the new value at the front
+static void shift_hist(const double val, double * const hist_array, const size_t N) {
+    size_t i;
+    for(i=N-1; i>0; i--)
+        hist_array[i] = hist_array[i-1];
+    hist_array[0] = val;
+}
+
+// Apply a filter and compute the result. 'a' is applied to x (inputs) and 'b' to y (outputs)
+static double apply_filter(const double* const x, const double* const y, const double* const a,
+                           const size_t Na, const double* const b, const size_t Nb)
+{
+    double total = 0;
+    for(size_t i=0; i<Na; i++) {
+        total += x[i] * a[i];
+    }
+    for(size_t i=1; i<Nb; i++) {
+        total -= y[i - 1] * b[i];
+    }
+    return total / b[0];
+}
+
+static float analog_calc()
+{
+    // Voice-only path.
+    // 1. Pick up the pitch wave
+
+    double v = votraxsc01_locals.pitch >= (9 << 3) ? 0 : s_glottal_wave[votraxsc01_locals.pitch >> 3];
+
+    // 2. Multiply by the initial amplifier.  It's linear on the die,
+    // even if it's not in the patent.
+    v = v * votraxsc01_locals.filt_va * (1.0/15.0);
+    shift_hist(v, votraxsc01_locals.voice_1, 4);
+
+    // 3. Apply the f1 filter
+    v = apply_filter(votraxsc01_locals.voice_1, votraxsc01_locals.voice_2, votraxsc01_locals.f1_a, 4, votraxsc01_locals.f1_b, 4);
+    shift_hist(v, votraxsc01_locals.voice_2, 4);
+
+    // 4. Apply the f2 filter, voice half
+    v = apply_filter(votraxsc01_locals.voice_2, votraxsc01_locals.voice_3, votraxsc01_locals.f2v_a, 4, votraxsc01_locals.f2v_b, 4);
+    shift_hist(v, votraxsc01_locals.voice_3, 4);
+
+    // Noise-only path
+    // 5. Pick up the noise pitch.  Amplitude is linear.  Base
+    // intensity should be checked w.r.t the voice.
+    double n = 1e4 * ((votraxsc01_locals.pitch & 0x40 ? votraxsc01_locals.cur_noise : 0) ? 1 : -1);
+    n = n * votraxsc01_locals.filt_fa * (1.0/15.0);
+    shift_hist(n, votraxsc01_locals.noise_1, 3);
+
+    // 6. Apply the noise shaper
+    n = apply_filter(votraxsc01_locals.noise_1, votraxsc01_locals.noise_2, votraxsc01_locals.fn_a, 3, votraxsc01_locals.fn_b, 3);
+    shift_hist(n, votraxsc01_locals.noise_2, 3);
+
+    // 7. Scale with the f2 noise input
+    double n2 = n * votraxsc01_locals.filt_fc * (1.0/15.0);
+    shift_hist(n2, votraxsc01_locals.noise_3, 2);
+
+    // 8. Apply the f2 filter, noise half,
+    n2 = apply_filter(votraxsc01_locals.noise_3, votraxsc01_locals.noise_4, votraxsc01_locals.f2n_a, 2, votraxsc01_locals.f2n_b, 2);
+    shift_hist(n2, votraxsc01_locals.noise_4, 2);
+
+    // Mixed path
+    // 9. Add the f2 voice and f2 noise outputs
+    double vn = v + n2;
+    shift_hist(vn, votraxsc01_locals.vn_1, 4);
+
+    // 10. Apply the f3 filter
+    vn = apply_filter(votraxsc01_locals.vn_1, votraxsc01_locals.vn_2, votraxsc01_locals.f3_a, 4, votraxsc01_locals.f3_b, 4);
+    shift_hist(vn, votraxsc01_locals.vn_2, 4);
+
+    // 11. Second noise insertion
+    vn += n * (5 + (15 ^ votraxsc01_locals.filt_fc)) * (1.0/20.0);
+    shift_hist(vn, votraxsc01_locals.vn_3, 4);
+
+    // 12. Apply the f4 filter
+    vn = apply_filter(votraxsc01_locals.vn_3, votraxsc01_locals.vn_4, votraxsc01_locals.f4_a, 4, votraxsc01_locals.f4_b, 4);
+    shift_hist(vn, votraxsc01_locals.vn_4, 4);
+
+    // 13. Apply the glottal closure amplitude, also linear
+    vn = vn * (7 ^ (votraxsc01_locals.closure >> 2)) * (1.0/7.0);
+    shift_hist(vn, votraxsc01_locals.vn_5, 2);
+
+    // 13. Apply the final fixed filter
+    vn = apply_filter(votraxsc01_locals.vn_5, votraxsc01_locals.vn_6, votraxsc01_locals.fx_a, 1, votraxsc01_locals.fx_b, 2);
+    shift_hist(vn, votraxsc01_locals.vn_6, 2);
+
+    return (float)vn * (float)(1.0/2.4); // prevent excessive clipping //!! MAME had a similar magic of * 1.5 here, which is way too loud though
+}
+
+
+/*--------------------------------------------------------------------
+ *
+ ---------------------------------------------------------------------*/
+void Votrax_Update(int16_t* const buffer, const size_t length)
+{
+    float* const __restrict buffer_f = (float*)buffer;
+
+    printf("Votrax SC-01: update %zu\n", length);
+
+    for (int i = 0; i<length; i++) {
+        votraxsc01_locals.sample_count++;
+        if (votraxsc01_locals.sample_count & 1)
+            chip_update();
+        buffer_f[i] = analog_calc();
+        //printf("Votrax SC-01: buffer %d\n", ac);
+    }
+}
+
+
+
+static double global_offset;
+static mame_timer* callback_timer = 0;
+static double callback_timer_expire_time = 0;
+static int callback_timer_modified;
+
+/* list of active timers */
+#define MAX_TIMERS 256
+static mame_timer timers[MAX_TIMERS];
+static mame_timer *timer_head = 0;
+static mame_timer *timer_free_head = 0;
+static mame_timer *timer_free_tail = 0;
+
+/*-------------------------------------------------
+        timer_init - initialize the timer system
+-------------------------------------------------*/
+void timer_init()
+{
+    /* we need to wait until the first call to timer_cyclestorun before using real CPU times */
+    global_offset = 0.0;
+    callback_timer = NULL;
+    callback_timer_modified = 0;
+
+    /* reset the timers */
+    memset(timers, 0, sizeof(timers));
+
+    /* initialize the lists */
+    timer_head = NULL;
+    timer_free_head = &timers[0];
+    for (int i = 0; i < MAX_TIMERS-1; i++)
+    {
+        timers[i].tag = -1;
+        timers[i].next = &timers[i+1];
+    }
+    timers[MAX_TIMERS-1].next = NULL;
+    timer_free_tail = &timers[MAX_TIMERS-1];
+}
+
+
+
+
+/*-------------------------------------------------
+        get_relative_time - return the current time
+        relative to the global_offset
+-------------------------------------------------*/
+double get_relative_time()
+{
+    /* if we're executing as a particular CPU, use its local time as a base */
+    /*activecpu = cpu_getactivecpu();
+    if (activecpu >= 0)
+        return cpunum_get_localtime(activecpu);*/
+
+    /* if we're currently in a callback, use the timer's expiration time as a base */
+    if (callback_timer)
+        return callback_timer_expire_time;
+
+    /* otherwise, return 0 */
+    return 0;
+}
+
+/*-------------------------------------------------
+        timer_new - allocate a new timer
+-------------------------------------------------*/
+mame_timer *timer_new()
+{
+    mame_timer* timer;
+
+    /* remove an empty entry */
+    if (!timer_free_head) return NULL;
+    timer = timer_free_head;
+    timer_free_head = timer->next;
+    if (!timer_free_head)
+        timer_free_tail = NULL;
+
+    return timer;
+}
+
+/*-------------------------------------------------
+        timer_list_insert - insert a new timer into
+        the list at the appropriate location
+-------------------------------------------------*/
+
+void timer_list_insert(mame_timer *timer)
+{
+    double expire = timer->enabled ? timer->expire : TIME_NEVER;
+    mame_timer *t, *lt = NULL;
+
+    /* loop over the timer list */
+    for (t = timer_head; t; lt = t, t = t->next)
+    {
+        /* if the current list entry expires after us, we should be inserted before it */
+        /* note that due to floating point rounding, we need to allow a bit of slop here */
+        /* because two equal entries -- within rounding precision -- need to sort in */
+        /* the order they were inserted into the list */
+        if ((t->expire - expire) > TIME_IN_NSEC(1))
+        {
+            /* link the new guy in before the current list entry */
+            timer->prev = t->prev;
+            timer->next = t;
+
+            if (t->prev)
+                t->prev->next = timer;
+            else
+                timer_head = timer;
+            t->prev = timer;
+            return;
+        }
+    }
+
+    /* need to insert after the last one */
+    if (lt)
+        lt->next = timer;
+    else
+        timer_head = timer;
+    timer->prev = lt;
+    timer->next = NULL;
+}
+
+/*-------------------------------------------------
+timer_alloc - allocate a permament timer that
+        isn't primed yet
+-------------------------------------------------*/
+mame_timer* timer_alloc(void (*callback)(int))
+{
+    double time = get_relative_time();
+    mame_timer* timer = timer_new();
+
+    /* fail if we can't allocate a new entry */
+    if (!timer)
+        return NULL;
+
+    /* fill in the record */
+    timer->callback = callback;
+    timer->callback_param = 0;
+    timer->enabled = 0;
+    timer->temporary = 0;
+    //timer->tag = get_resource_tag();
+    timer->period = 0;
+
+    /* compute the time of the next firing and insert into the list */
+    timer->start = time;
+    timer->expire = TIME_NEVER;
+    timer_list_insert(timer);
+
+    /* return a handle */
+    return timer;
 }

@@ -13,11 +13,31 @@
 	((BIT(val,B6) << 6) | (BIT(val,B5) << 5) | (BIT(val,B4) << 4) | \
 		(BIT(val,B3) << 3) | (BIT(val,B2) << 2) | (BIT(val,B1) << 1) | (BIT(val,B0) << 0))
 
+#define CLEAR_LINE false
+#define ASSERT_LINE true
+
+
+typedef enum {
+    T_COMMIT_PHONE,
+    T_END_OF_PHONE
+} clock_enum;
+
+typedef struct mame_timer
+{
+    struct mame_timer *next;
+    struct mame_timer *prev;
+    void (*callback)(int);
+    int callback_param;
+    int tag;
+    uint8_t enabled;
+    uint8_t temporary;
+    double period;
+    double start;
+    double expire;
+} mame_timer;
 
 typedef struct votraxsc01_vars {
-    //struct VOTRAXSC01interface *intf;
-
-    //mame_timer* timer;
+    mame_timer* timer;
 
     uint32_t mainclock;                                // Current main clock
     double   sclock;                                   // Stream sample clock (40KHz, main/18)
@@ -30,7 +50,7 @@ typedef struct votraxsc01_vars {
 
     // Outputs
     //!! devcb_write_line m_ar_cb;                      // Callback for ar
-    //bool     ar_state;                                  // Current ar state
+    bool     ar_state;                                  // Current ar state
 
     // "Unpacked" current rom values
     uint8_t  rom_duration;                              // Duration in 5KHz units (main/144) of one tick, 16 ticks per phone, 7 bits
@@ -89,3 +109,26 @@ typedef struct votraxsc01_vars {
 } votraxsc01_vars;
 
 extern int votrax_start();
+void votraxsc01_w(uint8_t);
+
+void Votrax_Update(int16_t*, size_t);
+
+extern void timer_init();
+
+// Filter updates
+void filters_commit(int);
+
+mame_timer* timer_alloc(void (*callback)(int));
+
+
+
+
+#define TIME_IN_HZ(hz)        (1.0 / (double)(hz))
+//#define TIME_IN_CYCLES(c,cpu) ((double)(c) * cycles_to_sec[cpu])
+#define TIME_IN_SEC(s)        ((double)(s))
+#define TIME_IN_MSEC(ms)      ((double)(ms) * (1.0 / 1000.0))
+#define TIME_IN_USEC(us)      ((double)(us) * (1.0 / 1000000.0))
+#define TIME_IN_NSEC(us)      ((double)(us) * (1.0 / 1000000000.0))
+
+#define TIME_NOW              (0.0)
+#define TIME_NEVER            (1.0e30)
