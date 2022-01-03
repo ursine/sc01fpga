@@ -4,7 +4,7 @@
 
 #include <pulse/simple.h>
 
-#define BUFF_SIZE 4096
+#define BUFF_SIZE 32000
 
 int16_t soundBuffer[BUFF_SIZE*2];
 
@@ -26,30 +26,32 @@ int main() {
                       NULL               // Ignore error code.
     );
 
-    votrax_start();
-
-    votraxsc01_w(28); // G
-
-    Votrax_Update(soundBuffer, BUFF_SIZE-1);
-
     int error;
     int res;
 
-    res = pa_simple_write(s, soundBuffer, BUFF_SIZE, &error);
-    printf("WRITE ERROR %d VAL %d\n", res, error);
+    votrax_start();
 
-    res = pa_simple_drain(s, &error);
-    printf("DRAIN ERROR %d VAL %d\n", res, error);
+    votraxsc01_w(28); // G
+    while(active()) {
+        Votrax_Update(soundBuffer, BUFF_SIZE - 1);
+
+        res = pa_simple_write(s, soundBuffer, BUFF_SIZE, &error);
+        printf("WRITE ERROR %d VAL %d\n", res, error);
+
+        res = pa_simple_drain(s, &error);
+        printf("DRAIN ERROR %d VAL %d\n", res, error);
+    }
 
     votraxsc01_w(33); // AY
-    Votrax_Update(soundBuffer, BUFF_SIZE-1);
+    while(active()) {
+        Votrax_Update(soundBuffer, BUFF_SIZE - 1);
 
-    res = pa_simple_write(s, soundBuffer, BUFF_SIZE, &error);
-    printf("WRITE ERROR %d VAL %d\n", res, error);
+        res = pa_simple_write(s, soundBuffer, BUFF_SIZE, &error);
+        printf("WRITE ERROR %d VAL %d\n", res, error);
 
-    res = pa_simple_drain(s, &error);
-    printf("DRAIN ERROR %d VAL %d\n", res, error);
-
+        res = pa_simple_drain(s, &error);
+        printf("DRAIN ERROR %d VAL %d\n", res, error);
+    }
     pa_simple_free(s);
 
     return 1;

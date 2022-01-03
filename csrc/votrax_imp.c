@@ -796,6 +796,9 @@ static void interpolate(uint8_t* const reg, const uint8_t target)
     *reg = *reg - (*reg >> 3) + (target << 1);
 }
 
+bool active() {
+    return votraxsc01_locals.ar_state!=ASSERT_LINE;
+}
 
 static void chip_update()
 {

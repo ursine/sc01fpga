@@ -122,7 +122,7 @@ void filters_commit(int);
 
 mame_timer* timer_alloc(void (*callback)(int));
 
-
+bool active();
 
 
 #define TIME_IN_HZ(hz)        (1.0 / (double)(hz))
