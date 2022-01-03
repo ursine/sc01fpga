@@ -6,6 +6,8 @@
 
 #define BUFF_SIZE 4096
 
+int16_t soundBuffer[BUFF_SIZE*2];
+
 int main() {
     pa_sample_spec ss;
 
@@ -24,19 +26,11 @@ int main() {
                       NULL               // Ignore error code.
     );
 
-
-
     votrax_start();
-
-    int16_t soundBuffer[BUFF_SIZE*2];
 
     votraxsc01_w(28); // G
 
     Votrax_Update(soundBuffer, BUFF_SIZE-1);
-
-    //for(int x=0; x<BUFF_SIZE; x++) {
-    //    printf("%d: %x\n",x, soundBuffer[x]);
-    //}
 
     int error;
     int res;
@@ -55,7 +49,7 @@ int main() {
 
     res = pa_simple_drain(s, &error);
     printf("DRAIN ERROR %d VAL %d\n", res, error);
-    
+
     pa_simple_free(s);
 
     return 1;

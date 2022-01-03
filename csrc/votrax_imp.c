@@ -1,6 +1,7 @@
 #include <math.h>
 #include <memory.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <time.h>
 #include "votrax_imp.h"
 
@@ -86,11 +87,11 @@ static const char *PhonemeNames[65] = {
 
 // Compute a total capacitor value based on which bits are currently active
 static unsigned int bits_to_caps(unsigned int value, const unsigned int* const caps_values, const size_t N) {
-    size_t i;
     unsigned int total = 0;
-    for(i = 0; i < N; ++i) {
-        if(value & 1)
+    for(size_t i = 0; i < N; ++i) {
+        if(value & 1) {
             total += caps_values[i];
+        }
         value >>= 1;
     }
     return total;
@@ -305,7 +306,9 @@ static void build_standard_filter(double* const a,
     // figure radians from frequency
     double w0 = fpeak * (2.0 * M_PI);
 
-    // keep it in -PI/T .. PI/T
+    printf("BSF1: k0:%f k1:%f k2:%f fpeak:%f w0:%f\n", k0, k1, k2, fpeak, w0);
+
+    // keep it in -PI/T .. PI/T  TODO: Cache this value when sclock computed
     const double wdMax = M_PI * votraxsc01_locals.sclock;
     if (w0 > wdMax) w0 -= 2.0 * wdMax;
 
@@ -317,6 +320,8 @@ static void build_standard_filter(double* const a,
     const double m1 = zc*k1;
     const double m2 = zc*zc*k2;
 
+    printf("BSF2: wdMax: %f zc:%f m0:%f m1:%f m2:%f\n", wdMax, zc, m0, m1, m2);
+
     a[0] = 1.+m0;
     a[1] = 3.+m0;
     a[2] = 3.-m0;
@@ -325,6 +330,9 @@ static void build_standard_filter(double* const a,
     b[1] = 3.+m1-m2;
     b[2] = 3.-m1-m2;
     b[3] = 1.-m1+m2;
+
+    printf("BSF3: a0:%f a1:%f a2:%f a3:%f\n", a[0], a[1], a[2], a[3]);
+    printf("BSF4: b0:%f b1:%f b2:%f b3:%f\n", b[0], b[1], b[2], b[3]);
 }
 
 
@@ -488,10 +496,14 @@ static void build_injection_filter(double* const a,
     // Finally compute the result of the z-transform
     const double m = zc*k2;
 
+    printf("BIF1: k0:%f k1:%f k2:%f zc:%f m:%f\n", k0, k1, k2, zc, m);
+
     a[0] = k0 + m;
     a[1] = k0 - m;
     b[0] = k1 - m;
     b[1] = k1 + m;
+
+    printf("BIF2: a0:%f a1:%f b0:%f b1:%f\n", a[0], a[1], b[0], b[1]);
 
     // That ends up in a numerically unstable filter.  Neutralize it for now.
     a[0] = 0;
@@ -510,8 +522,14 @@ static void phone_commit()
     // In the real chip, the rom is re-read all the time.  Since it's
     // internal and immutable, no point in not caching it though.
     for (int i = 0; i<64; i++) {
+        // Phonemes are defined by eight blocks in the ROM
         const uint64_t val = ((uint64_t*)sc01a_bin)[i];
-        if (votraxsc01_locals.phone == ((val >> 56) & 0x3f))
+
+        const uint8_t comparison = ((val >> 56) & 0x3f);
+
+        printf("ROM read loc: %d  val: %" PRIx64 "  comp: %x  phone: %x\n", i, val, comparison, votraxsc01_locals.phone);
+
+        if (votraxsc01_locals.phone == comparison)
         {
             votraxsc01_locals.rom_f1  = BITSWAP4(val, 0, 7, 14, 21);
             votraxsc01_locals.rom_va  = BITSWAP4(val, 1, 8, 15, 22);
@@ -535,19 +553,19 @@ static void phone_commit()
             // Hard-wired on the die, not an actual part of the rom.
             votraxsc01_locals.rom_pause = (votraxsc01_locals.phone == 0x03) || (votraxsc01_locals.phone == 0x3e);
 
-            printf("commit fa=%x va=%x fc=%x f1=%x f2=%x f2q=%x f3=%x dur=%02x cld=%x vd=%d cl=%d pause=%d\n", votraxsc01_locals.rom_fa, votraxsc01_locals.rom_va, votraxsc01_locals.rom_fc, votraxsc01_locals.rom_f1, votraxsc01_locals.rom_f2, votraxsc01_locals.rom_f2q, votraxsc01_locals.rom_f3, votraxsc01_locals.rom_duration, votraxsc01_locals.rom_cld, votraxsc01_locals.rom_vd, votraxsc01_locals.rom_closure, votraxsc01_locals.rom_pause);
+            printf("ROM commit fa=%x va=%x fc=%x f1=%x f2=%x f2q=%x f3=%x dur=%02x cld=%x vd=%d cl=%d pause=%d\n", votraxsc01_locals.rom_fa, votraxsc01_locals.rom_va, votraxsc01_locals.rom_fc, votraxsc01_locals.rom_f1, votraxsc01_locals.rom_f2, votraxsc01_locals.rom_f2q, votraxsc01_locals.rom_f3, votraxsc01_locals.rom_duration, votraxsc01_locals.rom_cld, votraxsc01_locals.rom_vd, votraxsc01_locals.rom_closure, votraxsc01_locals.rom_pause);
 
             // That does not happen in the sc01(a) rom, but let's
             // cover our behind.
-            if (votraxsc01_locals.rom_cld == 0)
-                votraxsc01_locals.cur_closure = votraxsc01_locals.rom_closure;
+            if (votraxsc01_locals.rom_cld == 0) {
+                votraxsc01_locals.cur_closure = votraxsc01_locals.rom_closure; }
 
             return;
         }
     }
 }
 
-void filters_commit(int force)
+void filters_commit(const int force)
 {
     votraxsc01_locals.filt_fa = votraxsc01_locals.cur_fa >> 4;
     votraxsc01_locals.filt_fc = votraxsc01_locals.cur_fc >> 4;
@@ -555,7 +573,7 @@ void filters_commit(int force)
 
     if (force || votraxsc01_locals.filt_f1 != votraxsc01_locals.cur_f1 >> 4) {
         votraxsc01_locals.filt_f1 = votraxsc01_locals.cur_f1 >> 4;
-
+        printf("BUILDING FILTER F1 %d\n",__LINE__);
         build_standard_filter(votraxsc01_locals.f1_a, votraxsc01_locals.f1_b,
                               11247,
                               11797,
@@ -569,6 +587,7 @@ void filters_commit(int force)
         votraxsc01_locals.filt_f2 = votraxsc01_locals.cur_f2 >> 3;
         votraxsc01_locals.filt_f2q = votraxsc01_locals.cur_f2q >> 4;
 
+        printf("BUILDING FILTER F2 %d\n",__LINE__);
         build_standard_filter(votraxsc01_locals.f2v_a, votraxsc01_locals.f2v_b,
                               24840,
                               29154,
@@ -576,6 +595,8 @@ void filters_commit(int force)
                               38180,
                               2352 + bits_to_caps(votraxsc01_locals.filt_f2, f2v2_caps, 5),
                               34270);
+
+        printf("BUILDING FILTER F2N %d\n",__LINE__);
 
         build_injection_filter(votraxsc01_locals.f2n_a, votraxsc01_locals.f2n_b,
                                29154,
@@ -587,6 +608,8 @@ void filters_commit(int force)
 
     if (force || votraxsc01_locals.filt_f3 != votraxsc01_locals.cur_f3 >> 4) {
         votraxsc01_locals.filt_f3 = votraxsc01_locals.cur_f3 >> 4;
+
+        printf("BUILDING FILTER F3 %d\n",__LINE__);
         build_standard_filter(votraxsc01_locals.f3_a, votraxsc01_locals.f3_b,
                               0,
                               17594,
@@ -597,6 +620,7 @@ void filters_commit(int force)
     }
 
     if (force) {
+        printf("BUILDING FILTER F4 %d\n",__LINE__);
         build_standard_filter(votraxsc01_locals.f4_a, votraxsc01_locals.f4_b,
                               0,
                               28810,
@@ -605,10 +629,12 @@ void filters_commit(int force)
                               8558,
                               7289);
 
+        printf("BUILDING FILTER FX %d\n",__LINE__);
         build_lowpass_filter(votraxsc01_locals.fx_a, votraxsc01_locals.fx_b,
                              1122,
                              23131);
 
+        printf("BUILDING FILTER FN %d\n",__LINE__);
         build_noise_shaper_filter(votraxsc01_locals.fn_a, votraxsc01_locals.fn_b,
                                   15500,
                                   14854,
@@ -627,6 +653,7 @@ void filters_commit(int force)
 
 int votrax_start()
 {
+    // Clear everything to 0 in our local data
     memset(&votraxsc01_locals, 0x00, sizeof(votraxsc01_locals));
 
     // Defines the sound interface
@@ -637,6 +664,12 @@ int votrax_start()
     votraxsc01_locals.mainclock = 9000;
     votraxsc01_locals.sclock = votraxsc01_locals.mainclock / 18.0;
     votraxsc01_locals.cclock = votraxsc01_locals.mainclock / 36.0;
+
+    printf("CLOCKS: main:%d sclock:%f cclock:%f\n",
+           votraxsc01_locals.mainclock,
+           votraxsc01_locals.sclock,
+           votraxsc01_locals.cclock
+    );
 
     // This is used to initialize the device
     //votraxsc01_locals.stream = stream_init_float("Votrax - SC01", votraxsc01_locals.intf->mixing_level[0], votraxsc01_locals.sclock, 0, Votrax_Update, 1);
@@ -676,8 +709,6 @@ int votrax_start()
     votraxsc01_locals.cur_closure = 1;
     votraxsc01_locals.noise = 0;
     votraxsc01_locals.cur_noise = 0;
-
-    return 0;
 }
 
 void votrax_stop()
@@ -687,10 +718,35 @@ void votrax_stop()
     //votraxsc01_locals.timer = 0;
 }
 
-
 void stream_update(int channel, int min_interval) {
     printf("Stream Update\n");
 } // todo: output sound
+
+
+static void VOTRAXSC01_sh_start_timeout(const clock_enum which)
+{
+    stream_update(votraxsc01_locals.stream, 0);
+
+    switch (which) {
+        case T_COMMIT_PHONE:
+            // strobe -> commit transition,
+            phone_commit();
+            //timer_adjust(votraxsc01_locals.timer, (double)(16 * (votraxsc01_locals.rom_duration * 4u + 1) * 4 * 9 + 2)/(double)votraxsc01_locals.mainclock/*attotime::from_ticks(16 * (votraxsc01_locals.rom_duration * 4 + 1) * 4 * 9 + 2, votraxsc01_locals.mainclock)*/, T_END_OF_PHONE, TIME_NEVER);
+            break;
+
+        case T_END_OF_PHONE:
+            // end of phone
+            votraxsc01_locals.ar_state = ASSERT_LINE;
+            break;
+
+        default:
+            break;
+    }
+
+    //!! m_ar_cb(votraxsc01_locals.ar_state);
+    //if (votraxsc01_locals.intf->BusyCallback[0])
+    //    (*votraxsc01_locals.intf->BusyCallback[0])(!votraxsc01_locals.ar_state); //!! inverted behavior from MAME
+}
 
 void votraxsc01_w(const uint8_t data)
 {
@@ -725,39 +781,13 @@ void votraxsc01_w(const uint8_t data)
     // but only if there isn't already one on the fly.  It will
     // override an end-of-phone timeout if there's one pending, but
     // that's not a problem since stb does that anyway.
+    VOTRAXSC01_sh_start_timeout(T_COMMIT_PHONE);
 //    if (timer_expire(votraxsc01_locals.timer) == TIME_NEVER || timer_param(votraxsc01_locals.timer) != T_COMMIT_PHONE) {
 //        timer_adjust(votraxsc01_locals.timer,
 //                    72./(double)votraxsc01_locals.mainclock  /*attotime::from_ticks(72, votraxsc01_locals.mainclock)*/,
 //                    T_COMMIT_PHONE, TIME_NEVER); //!! correct?
 //    }
 }
-
-
-static void VOTRAXSC01_sh_start_timeout(const clock_enum which)
-{
-    stream_update(votraxsc01_locals.stream, 0);
-
-    switch (which) {
-        case T_COMMIT_PHONE:
-            // strobe -> commit transition,
-            phone_commit();
-            //timer_adjust(votraxsc01_locals.timer, (double)(16 * (votraxsc01_locals.rom_duration * 4u + 1) * 4 * 9 + 2)/(double)votraxsc01_locals.mainclock/*attotime::from_ticks(16 * (votraxsc01_locals.rom_duration * 4 + 1) * 4 * 9 + 2, votraxsc01_locals.mainclock)*/, T_END_OF_PHONE, TIME_NEVER);
-            break;
-
-        case T_END_OF_PHONE:
-            // end of phone
-            votraxsc01_locals.ar_state = ASSERT_LINE;
-            break;
-
-        default:
-            break;
-    }
-
-    //!! m_ar_cb(votraxsc01_locals.ar_state);
-    //if (votraxsc01_locals.intf->BusyCallback[0])
-    //    (*votraxsc01_locals.intf->BusyCallback[0])(!votraxsc01_locals.ar_state); //!! inverted behavior from MAME
-}
-
 
 static void interpolate(uint8_t* const reg, const uint8_t target)
 {

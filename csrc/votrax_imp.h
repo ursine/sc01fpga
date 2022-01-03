@@ -16,6 +16,8 @@
 #define CLEAR_LINE false
 #define ASSERT_LINE true
 
+#define ARRAYSIZE(arr) (sizeof(arr) / sizeof(arr[0]))
+
 
 typedef enum {
     T_COMMIT_PHONE,
